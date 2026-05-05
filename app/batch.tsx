@@ -1,5 +1,5 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
-
+import { router } from 'expo-router';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 const data = [
   { id: '1', name: 'Grade 5A', students: 32 },
   { id: '2', name: 'Grade 5B', students: 28 },
@@ -11,7 +11,10 @@ const data = [
 export default function Batch() {
 
   const renderItem = ({ item }: any) => (
-    <TouchableOpacity style={styles.card}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => router.push('/students' as any)}   // ✅ ADD THIS
+    >
       
       <View style={styles.iconBox}>
         <Text>👥</Text>
@@ -29,7 +32,7 @@ export default function Batch() {
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Select Batch</Text>
-
+      
       <FlatList
         data={data}
         renderItem={renderItem}
@@ -46,9 +49,10 @@ const styles = StyleSheet.create({
     padding: 15
   },
   header: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '600',
-    marginBottom: 15
+    marginBottom: 15,
+    paddingTop: 25
   },
   card: {
     flexDirection: 'row',
@@ -57,7 +61,7 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 15,
     marginBottom: 12,
-    elevation: 3
+    elevation: 1
   },
   iconBox: {
     backgroundColor: '#e0e7ff',
