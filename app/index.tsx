@@ -1,28 +1,125 @@
-import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { Redirect, router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  Alert,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
-
+import { ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 
 export default function Login() {
 
-  useEffect(() => {
-    const test = async () => {
-      const { data, error } = await supabase
-        .from('schools')
-        .select('*');
+  // ALL hooks at top
+  const [session, setSession] = useState<any>(undefined);
 
-      console.log('Supabase connected:', data, error);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // useEffect ALWAYS before returns
+  useEffect(() => {
+
+    const loadSession = async () => {
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      setSession(session);
     };
 
-    test();
+    loadSession();
+
   }, []);
+
+  // AFTER all hooks
+  if (session === undefined) {
+  return (
+    <View style={styles.container}>
+
+      <ActivityIndicator
+        size="large"
+        color="#3b82f6"
+      />
+
+
+    </View>
+  );
+}
+
+  if (session) {
+    return <Redirect href="/batch" />;
+  }
+
+  const handleLogin = async () => {
+
+    if (!email || !password) {
+      Alert.alert(
+        'Missing Details',
+        'Please enter email and password'
+      );
+      return;
+    }
+
+    try {
+
+      setLoading(true);
+
+      const { data, error } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+      if (error) {
+
+        Alert.alert(
+          'Login Failed',
+          'Invalid email or password'
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      const { data: profile, error: profileError } =
+        await supabase
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+      if (profileError || !profile) {
+
+        Alert.alert(
+          'Profile Error',
+          'User profile not found'
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+
+      router.replace('/batch');
+
+    } catch (err) {
+
+      console.log(err);
+
+      Alert.alert(
+        'Error',
+        'Something went wrong'
+      );
+
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -31,16 +128,23 @@ export default function Login() {
         <Text style={styles.logo}>📘</Text>
       </View>
 
-      <Text style={styles.title}>Teacher Portal</Text>
+      <Text style={styles.title}>
+        Teacher Portal
+      </Text>
 
       <TextInput
-        placeholder="Teacher Name"
+        placeholder="Email"
+        value={email}
+        onChangeText={setEmail}
         style={styles.input}
         placeholderTextColor="#999"
+        autoCapitalize="none"
       />
 
       <TextInput
         placeholder="Password"
+        value={password}
+        onChangeText={setPassword}
         secureTextEntry
         style={styles.input}
         placeholderTextColor="#999"
@@ -48,9 +152,12 @@ export default function Login() {
 
       <TouchableOpacity
         style={styles.button}
-        onPress={() => router.push('/batch')}
+        onPress={handleLogin}
+        disabled={loading}
       >
-        <Text style={styles.buttonText}>Login</Text>
+        <Text style={styles.buttonText}>
+          {loading ? 'Logging in...' : 'Login'}
+        </Text>
       </TouchableOpacity>
 
     </View>
