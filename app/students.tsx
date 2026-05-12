@@ -1,17 +1,23 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { router } from 'expo-router';
-import { useState } from 'react';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { supabase } from '../lib/supabase';
 
-const studentsData = [
-  { id: '1', name: 'Emma Thompson' },
-  { id: '2', name: 'Liam Johnson' },
-  { id: '3', name: 'Sophia Martinez' },
-  { id: '4', name: 'Noah Williams' },
-  { id: '5', name: 'Olivia Brown' },
-  { id: '6', name: 'Ethan Davis' },
-  { id: '7', name: 'Ava Garcia' },
-];
+type Student = {
+  id: string;
+  name: string;
+  roll_number: string | null;
+};
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString('en-US', {
@@ -30,30 +36,122 @@ function formatDateLong(date: Date): string {
   });
 }
 
+// yyyy-mm-dd for DB queries
+function formatDateISO(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
 export default function Students() {
+  const { batchId, batchName } = useLocalSearchParams<{
+    batchId: string;
+    batchName: string;
+  }>();
+
+  const [students, setStudents] = useState<Student[]>([]);
   const [present, setPresent] = useState<string[]>([]);
   const [date, setDate] = useState<Date>(new Date());
   const [showPicker, setShowPicker] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Fetch students when batchId changes
+  useEffect(() => {
+    if (batchId) fetchStudents();
+  }, [batchId]);
+
+  // Fetch existing attendance whenever date or students change
+  useEffect(() => {
+    if (students.length > 0) fetchAttendance();
+  }, [date, students]);
+
+  const fetchStudents = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('students')
+        .select('id, name, roll_number')
+        .eq('batch_id', batchId)
+        .eq('is_active', true)
+        .order('roll_number', { ascending: true });
+
+      if (error) throw error;
+      setStudents(data || []);
+    } catch (err) {
+      console.error('Error fetching students:', err);
+      Alert.alert('Error', 'Could not load students.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAttendance = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('student_id, is_present')
+        .eq('batch_id', batchId)
+        .eq('date', formatDateISO(date));
+
+      if (error) throw error;
+
+      // Mark as present only those with is_present = true
+      const presentIds = (data || [])
+        .filter((r) => r.is_present)
+        .map((r) => r.student_id);
+
+      setPresent(presentIds);
+    } catch (err) {
+      console.error('Error fetching attendance:', err);
+    }
+  };
 
   const toggleAttendance = (id: string) => {
-    if (present.includes(id)) {
-      setPresent(present.filter(item => item !== id));
-    } else {
-      setPresent([...present, id]);
+    setPresent((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    );
+  };
+
+  const saveAttendance = async () => {
+    try {
+      setSaving(true);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const dateISO = formatDateISO(date);
+
+      // Upsert all students' attendance for this date
+      const records = students.map((s) => ({
+        student_id: s.id,
+        batch_id: batchId,
+        date: dateISO,
+        is_present: present.includes(s.id),
+        marked_by: user.id,
+      }));
+
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(records, {
+          onConflict: 'student_id,batch_id,date',
+        });
+
+      if (error) throw error;
+
+      Alert.alert('Saved', 'Attendance saved successfully.');
+    } catch (err) {
+      console.error('Error saving attendance:', err);
+      Alert.alert('Error', 'Could not save attendance.');
+    } finally {
+      setSaving(false);
     }
   };
 
   const onDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
-    // On Android the picker closes automatically; on iOS keep it open
-    if (Platform.OS === 'android') {
-      setShowPicker(false);
-    }
-    if (event.type === 'set' && selectedDate) {
-      setDate(selectedDate);
-    }
+    if (Platform.OS === 'android') setShowPicker(false);
+    if (event.type === 'set' && selectedDate) setDate(selectedDate);
   };
 
-  const renderItem = ({ item }: any) => {
+  const renderItem = ({ item }: { item: Student }) => {
     const isPresent = present.includes(item.id);
 
     return (
@@ -61,11 +159,11 @@ export default function Students() {
         style={[styles.card, isPresent && styles.presentCard]}
         onPress={() => toggleAttendance(item.id)}
         onLongPress={() =>
-        router.push({
-          pathname: '/studentDetails',
-          params: { id: item.id, name: item.name },
-        })
-}
+          router.push({
+            pathname: '/studentDetails',
+            params: { id: item.id, name: item.name },
+          })
+        }
       >
         <View style={[styles.avatar, isPresent && styles.presentAvatar]}>
           <Text style={[styles.avatarText, isPresent && { color: 'white' }]}>
@@ -73,13 +171,20 @@ export default function Students() {
           </Text>
         </View>
 
-        <Text style={[styles.name, isPresent && { color: 'white' }]}>
-          {item.name}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.name, isPresent && { color: 'white' }]}>
+            {item.name}
+          </Text>
+          {item.roll_number && (
+            <Text style={[styles.rollNo, isPresent && { color: 'rgba(255,255,255,0.75)' }]}>
+              Roll #{item.roll_number}
+            </Text>
+          )}
+        </View>
 
         {isPresent
           ? <Text style={styles.tick}>✓</Text>
-          : <Text style={styles.tap}>Tap to mark present</Text>
+          : <Text style={styles.tap}>Tap to mark</Text>
         }
       </TouchableOpacity>
     );
@@ -87,32 +192,31 @@ export default function Students() {
 
   return (
     <View style={styles.container}>
+
       {/* Header */}
       <Text style={styles.header}>Students</Text>
-      <Text style={styles.sub}>Grade 5A</Text>
+      <Text style={styles.sub}>{batchName ?? 'Batch'}</Text>
 
       {/* Date Picker Row */}
       <TouchableOpacity
         style={styles.dateRow}
-        onPress={() => setShowPicker(prev => !prev)}
+        onPress={() => setShowPicker((prev) => !prev)}
         activeOpacity={0.7}
       >
         <Text style={styles.calendarIcon}>📅</Text>
         <Text style={styles.dateText}>{formatDate(date)}</Text>
       </TouchableOpacity>
 
-      {/* Native Picker — shown inline on iOS, as modal on Android */}
       {showPicker && (
         <DateTimePicker
           value={date}
           mode="date"
           display={Platform.OS === 'ios' ? 'inline' : 'default'}
           onChange={onDateChange}
-          maximumDate={new Date()} // optional: prevent future dates
+          maximumDate={new Date()}
         />
       )}
 
-      {/* iOS: Done button to dismiss */}
       {showPicker && Platform.OS === 'ios' && (
         <TouchableOpacity
           style={styles.doneButton}
@@ -125,18 +229,43 @@ export default function Students() {
       {/* Attendance summary */}
       <View style={styles.attendanceRow}>
         <Text style={styles.attendanceText}>
-          Attendance: {present.length}/{studentsData.length}
+          Attendance: {present.length}/{students.length}
         </Text>
         <Text style={styles.attendanceDateText}>{formatDateLong(date)}</Text>
       </View>
 
       {/* Student list */}
-      <FlatList
-        data={studentsData}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+        </View>
+      ) : students.length === 0 ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>No students in this batch.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={students}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 100 }}
+        />
+      )}
+
+      {/* Save button */}
+      {!loading && students.length > 0 && (
+        <TouchableOpacity
+          style={[styles.saveButton, saving && { opacity: 0.7 }]}
+          onPress={saveAttendance}
+          disabled={saving}
+        >
+          <Text style={styles.saveText}>
+            {saving ? 'Saving...' : '⎙  Save Attendance'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
     </View>
   );
 }
@@ -147,7 +276,6 @@ const styles = StyleSheet.create({
   header: { fontSize: 22, fontWeight: '600', paddingTop: 25 },
   sub: { color: 'gray', marginBottom: 12 },
 
-  // Date picker trigger row
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -162,7 +290,6 @@ const styles = StyleSheet.create({
   calendarIcon: { fontSize: 18, marginRight: 10 },
   dateText: { fontSize: 16, color: '#1f2937', fontWeight: '500' },
 
-  // iOS Done button
   doneButton: {
     alignSelf: 'flex-end',
     paddingHorizontal: 16,
@@ -173,7 +300,6 @@ const styles = StyleSheet.create({
   },
   doneText: { color: 'white', fontWeight: '600' },
 
-  // Attendance bar
   attendanceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -186,7 +312,6 @@ const styles = StyleSheet.create({
   attendanceText: { fontWeight: '500', color: '#374151' },
   attendanceDateText: { color: '#6b7280', fontSize: 13 },
 
-  // Student cards
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -209,7 +334,23 @@ const styles = StyleSheet.create({
   presentAvatar: { backgroundColor: 'rgba(255,255,255,0.3)' },
   avatarText: { fontWeight: '600', color: '#3b82f6' },
 
-  name: { flex: 1, fontWeight: '500' },
+  name: { fontWeight: '500' },
+  rollNo: { fontSize: 12, color: '#6b7280', marginTop: 1 },
   tap: { color: '#9ca3af', fontSize: 12 },
   tick: { color: 'white', fontSize: 18 },
+
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { color: '#6b7280', fontSize: 15 },
+
+  saveButton: {
+    position: 'absolute',
+    bottom: 20,
+    left: 15,
+    right: 15,
+    backgroundColor: '#3b82f6',
+    padding: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  saveText: { color: 'white', fontWeight: '600', fontSize: 16 },
 });
