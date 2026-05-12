@@ -1,118 +1,251 @@
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
 } from 'react-native';
+
 import { useLocalSearchParams, router } from 'expo-router';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+
+import { supabase } from '../lib/supabase';
 
 const TOTAL = 32;
 
 type Status = 'none' | 'partial' | 'complete';
 
 export default function ProgressScreen() {
-  const { title, studentName } = useLocalSearchParams<{
+  const { title, studentName, studentId } = useLocalSearchParams<{
     title: string;
     studentName: string;
+    studentId: string;
   }>();
 
   const [statuses, setStatuses] = useState<Record<number, Status>>(
-    Object.fromEntries(Array.from({ length: TOTAL }, (_, i) => [i + 1, 'none']))
+    Object.fromEntries(
+      Array.from({ length: TOTAL }, (_, i) => [i + 1, 'none'])
+    ) as Record<number, Status>
   );
 
-  // For double-tap detection
+  // Double tap tracking
   const lastTap = useRef<Record<number, number>>({});
 
-  const NO_PARTIAL_SCREENS = ['Activity Book Progress', 'Practice Progress'];
+  const NO_PARTIAL_SCREENS = [
+    'Activity Book Progress',
+    'Practice Progress',
+  ];
 
-// Update handleTap:
-const handleTap = (num: number) => {
-  const noPartial = NO_PARTIAL_SCREENS.includes(title ?? '');
+  // Load progress from DB
+  useEffect(() => {
+    fetchProgress();
+  }, []);
 
-  setStatuses(prev => {
-    const current = prev[num];
-    let next: Status;
+  const fetchProgress = async () => {
+    const { data, error } = await supabase
+      .from('progress')
+      .select('*')
+      .eq('student_id', studentId)
+      .eq('type', title);
 
-    if (noPartial) {
-      // Simple toggle: none → complete → none
-      next = current === 'complete' ? 'none' : 'complete';
-    } else {
-      // Double-tap detection for other screens
-      const now = Date.now();
-      const last = lastTap.current[num] || 0;
-      const isDoubleTap = now - last < 400;
-      lastTap.current[num] = now;
-
-      if (isDoubleTap) {
-        next = current === 'complete' ? 'none' : 'complete';
-      } else {
-        next = current === 'none' ? 'partial' : current === 'partial' ? 'none' : current;
-      }
+    if (error) {
+      console.log('Fetch error:', error);
+      return;
     }
 
-    return { ...prev, [num]: next };
-  });
-};
+    if (data) {
+      const mapped: Record<number, Status> = {};
 
-  const completeCount = Object.values(statuses).filter(s => s === 'complete').length;
-  const partialCount  = Object.values(statuses).filter(s => s === 'partial').length;
+      data.forEach(item => {
+        mapped[item.item_number] = item.status;
+      });
+
+      setStatuses(prev => ({
+        ...prev,
+        ...mapped,
+      }));
+    }
+  };
+
+  // Save progress
+  const saveProgress = async (
+    itemNumber: number,
+    status: Status
+  ) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await supabase
+      .from('progress')
+      .upsert(
+        {
+          student_id: studentId,
+          type: title,
+          item_number: itemNumber,
+          status: status,
+          updated_by: user?.id,
+        },
+        {
+          onConflict: 'student_id,type,item_number',
+        }
+      );
+
+    if (error) {
+      console.log('Save error:', error);
+    }
+  };
+
+  // Handle taps
+  const handleTap = (num: number) => {
+    const noPartial = NO_PARTIAL_SCREENS.includes(title ?? '');
+
+    setStatuses(prev => {
+      const current = prev[num];
+      let next: Status;
+
+      if (noPartial) {
+        // none → complete → none
+        next = current === 'complete' ? 'none' : 'complete';
+      } else {
+        const now = Date.now();
+        const last = lastTap.current[num] || 0;
+
+        const isDoubleTap = now - last < 400;
+
+        lastTap.current[num] = now;
+
+        if (isDoubleTap) {
+          next = current === 'complete'
+            ? 'none'
+            : 'complete';
+        } else {
+          next =
+            current === 'none'
+              ? 'partial'
+              : current === 'partial'
+              ? 'none'
+              : current;
+        }
+      }
+
+      // Save to DB
+      saveProgress(num, next);
+
+      return {
+        ...prev,
+        [num]: next,
+      };
+    });
+  };
+
+  const completeCount = Object.values(statuses).filter(
+    s => s === 'complete'
+  ).length;
+
+  const partialCount = Object.values(statuses).filter(
+    s => s === 'partial'
+  ).length;
+
   const noPartial = NO_PARTIAL_SCREENS.includes(title ?? '');
 
   const getBubbleStyle = (num: number) => {
     const s = statuses[num];
+
     if (s === 'complete') return styles.bubbleComplete;
-    if (s === 'partial')  return styles.bubblePartial;
+    if (s === 'partial') return styles.bubblePartial;
+
     return styles.bubbleNone;
   };
 
   const getBubbleTextStyle = (num: number) => {
     const s = statuses[num];
+
     if (s === 'complete') return styles.bubbleTextComplete;
-    if (s === 'partial')  return styles.bubbleTextPartial;
+    if (s === 'partial') return styles.bubbleTextPartial;
+
     return styles.bubbleTextNone;
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+    >
       {/* Header */}
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+        >
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
+
         <View>
-          <Text style={styles.header}>{title ?? 'Progress'}</Text>
-          <Text style={styles.subHeader}>{studentName ?? ''}</Text>
+          <Text style={styles.header}>
+            {title ?? 'Progress'}
+          </Text>
+
+          <Text style={styles.subHeader}>
+            {studentName ?? ''}
+          </Text>
         </View>
       </View>
 
       <View style={styles.divider} />
 
-      {/* Legend / Count Row */}
+      {/* Legend */}
       <View style={styles.legendRow}>
-  <View style={styles.legendItem}>
-    <View style={[styles.legendDot, { backgroundColor: '#3b82f6' }]} />
-    <Text style={styles.legendText}>Complete: {completeCount}</Text>
-  </View>
-  {!noPartial && (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: '#bfdbfe' }]} />
-      <Text style={styles.legendText}>Partial: {partialCount}</Text>
-    </View>
-  )}
-</View>
+        <View style={styles.legendItem}>
+          <View
+            style={[
+              styles.legendDot,
+              { backgroundColor: '#3b82f6' },
+            ]}
+          />
+
+          <Text style={styles.legendText}>
+            Complete: {completeCount}
+          </Text>
+        </View>
+
+        {!noPartial && (
+          <View style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendDot,
+                { backgroundColor: '#bfdbfe' },
+              ]}
+            />
+
+            <Text style={styles.legendText}>
+              Partial: {partialCount}
+            </Text>
+          </View>
+        )}
+      </View>
 
       <View style={styles.divider} />
 
-      {/* Number Grid */}
+      {/* Grid */}
       <View style={styles.gridCard}>
         <View style={styles.grid}>
           {Array.from({ length: TOTAL }, (_, i) => i + 1).map(num => (
             <TouchableOpacity
               key={num}
-              style={[styles.bubble, getBubbleStyle(num)]}
+              style={[
+                styles.bubble,
+                getBubbleStyle(num),
+              ]}
               onPress={() => handleTap(num)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.bubbleText, getBubbleTextStyle(num)]}>
+              <Text
+                style={[
+                  styles.bubbleText,
+                  getBubbleTextStyle(num),
+                ]}
+              >
                 {num}
               </Text>
             </TouchableOpacity>
@@ -122,21 +255,26 @@ const handleTap = (num: number) => {
 
       {/* Hint */}
       <View style={styles.hintCard}>
-  <Text style={styles.hintText}>
-    {noPartial
-      ? 'Tap to mark complete, tap again to undo'
-      : 'Tap once for partial completion, double-tap for full completion'
-    }
-  </Text>
-</View>
-
+        <Text style={styles.hintText}>
+          {noPartial
+            ? 'Tap to mark complete, tap again to undo'
+            : 'Tap once for partial completion, double-tap for full completion'}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f2f4f7' },
-  content: { padding: 15, paddingBottom: 40 },
+  container: {
+    flex: 1,
+    backgroundColor: '#f2f4f7',
+  },
+
+  content: {
+    padding: 15,
+    paddingBottom: 40,
+  },
 
   headerRow: {
     flexDirection: 'row',
@@ -145,10 +283,29 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     gap: 6,
   },
-  backBtn: { padding: 2, marginRight: 4 },
-  backArrow: { fontSize: 28, color: '#1f2937', lineHeight: 30 },
-  header: { fontSize: 20, fontWeight: '700', color: '#1f2937' },
-  subHeader: { fontSize: 13, color: '#6b7280', marginTop: 1 },
+
+  backBtn: {
+    padding: 2,
+    marginRight: 4,
+  },
+
+  backArrow: {
+    fontSize: 28,
+    color: '#1f2937',
+    lineHeight: 30,
+  },
+
+  header: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+
+  subHeader: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 1,
+  },
 
   divider: {
     height: 1,
@@ -163,21 +320,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     marginBottom: 14,
   },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 16, height: 16, borderRadius: 4 },
-  legendText: { fontSize: 14, color: '#374151', fontWeight: '500' },
+
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  legendDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+  },
+
+  legendText: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
+  },
 
   gridCard: {
     backgroundColor: 'white',
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
+
     shadowColor: '#000',
     shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
     shadowRadius: 4,
+
     elevation: 1,
   },
+
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -192,29 +370,49 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
   bubbleNone: {
     backgroundColor: 'white',
     borderWidth: 1.5,
     borderColor: '#e5e7eb',
   },
+
   bubblePartial: {
     backgroundColor: '#bfdbfe',
     borderWidth: 0,
   },
+
   bubbleComplete: {
     backgroundColor: '#3b82f6',
     borderWidth: 0,
   },
 
-  bubbleText: { fontSize: 13, fontWeight: '600' },
-  bubbleTextNone:     { color: '#9ca3af' },
-  bubbleTextPartial:  { color: '#1d4ed8' },
-  bubbleTextComplete: { color: 'white' },
+  bubbleText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  bubbleTextNone: {
+    color: '#9ca3af',
+  },
+
+  bubbleTextPartial: {
+    color: '#1d4ed8',
+  },
+
+  bubbleTextComplete: {
+    color: 'white',
+  },
 
   hintCard: {
     backgroundColor: '#eff6ff',
     borderRadius: 12,
     padding: 16,
   },
-  hintText: { color: '#374151', fontSize: 14, lineHeight: 20 },
+
+  hintText: {
+    color: '#374151',
+    fontSize: 14,
+    lineHeight: 20,
+  },
 });

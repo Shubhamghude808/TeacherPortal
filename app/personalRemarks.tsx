@@ -1,29 +1,124 @@
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+
 import { useLocalSearchParams, router } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+import { supabase } from '../lib/supabase';
 
 export default function PersonalRemarks() {
-  const { studentName } = useLocalSearchParams<{ studentName: string }>();
-  const [remarks, setRemarks] = useState('');
+  const { studentName, studentId } = useLocalSearchParams<{
+    studentName: string;
+    studentId: string;
+  }>();
 
-  const handleSave = () => {
-    if (!remarks.trim()) {
-      Alert.alert('Empty Remarks', 'Please write something before saving.');
+  const [remarks, setRemarks] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Load existing remarks
+  useEffect(() => {
+    fetchRemarks();
+  }, []);
+
+  const fetchRemarks = async () => {
+    const { data, error } = await supabase
+      .from('remarks')
+      .select('*')
+      .eq('student_id', studentId)
+      .single();
+
+    if (error) {
+      // Ignore "no rows found"
+      if (error.code !== 'PGRST116') {
+        console.log('Fetch remarks error:', error);
+      }
       return;
     }
-    // Save logic here (API call, local storage, etc.)
-    Alert.alert('Saved', 'Remarks saved successfully!', [
-      { text: 'OK', onPress: () => router.back() }
-    ]);
+
+    if (data) {
+      setRemarks(data.content || '');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!remarks.trim()) {
+      Alert.alert(
+        'Empty Remarks',
+        'Please write something before saving.'
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const { error } = await supabase
+        .from('remarks')
+        .upsert(
+          {
+            student_id: studentId,
+            content: remarks,
+            written_by: user?.id,
+          },
+          {
+            onConflict: 'student_id',
+          }
+        );
+
+      if (error) {
+        console.log('Save remarks error:', error);
+
+        Alert.alert(
+          'Error',
+          'Failed to save remarks.'
+        );
+
+        return;
+      }
+
+      Alert.alert(
+        'Saved',
+        'Remarks saved successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => router.back(),
+          },
+        ]
+      );
+    } catch (err) {
+      console.log(err);
+
+      Alert.alert(
+        'Error',
+        'Something went wrong.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
     >
       <ScrollView
         style={styles.container}
@@ -32,12 +127,21 @@ export default function PersonalRemarks() {
       >
         {/* Header */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+          >
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
+
           <View>
-            <Text style={styles.header}>Personal Remarks</Text>
-            <Text style={styles.subHeader}>{studentName ?? 'Student'}</Text>
+            <Text style={styles.header}>
+              Personal Remarks
+            </Text>
+
+            <Text style={styles.subHeader}>
+              {studentName ?? 'Student'}
+            </Text>
           </View>
         </View>
 
@@ -55,19 +159,37 @@ export default function PersonalRemarks() {
             textAlignVertical="top"
           />
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.85}>
-            <Text style={styles.saveText}>Save Remarks</Text>
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              loading && { opacity: 0.7 },
+            ]}
+            onPress={handleSave}
+            activeOpacity={0.85}
+            disabled={loading}
+          >
+            <Text style={styles.saveText}>
+              {loading
+                ? 'Saving...'
+                : 'Save Remarks'}
+            </Text>
           </TouchableOpacity>
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f2f4f7' },
-  content: { padding: 15, paddingBottom: 40 },
+  container: {
+    flex: 1,
+    backgroundColor: '#f2f4f7',
+  },
+
+  content: {
+    padding: 15,
+    paddingBottom: 40,
+  },
 
   headerRow: {
     flexDirection: 'row',
@@ -76,10 +198,29 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     gap: 6,
   },
-  backBtn: { padding: 2, marginRight: 4 },
-  backArrow: { fontSize: 28, color: '#1f2937', lineHeight: 30 },
-  header: { fontSize: 20, fontWeight: '700', color: '#1f2937' },
-  subHeader: { fontSize: 13, color: '#6b7280', marginTop: 1 },
+
+  backBtn: {
+    padding: 2,
+    marginRight: 4,
+  },
+
+  backArrow: {
+    fontSize: 28,
+    color: '#1f2937',
+    lineHeight: 30,
+  },
+
+  header: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+
+  subHeader: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 1,
+  },
 
   divider: {
     height: 1,
@@ -92,10 +233,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 16,
     padding: 16,
+
     shadowColor: '#000',
     shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
     shadowRadius: 4,
+
     elevation: 1,
     gap: 16,
   },
@@ -118,6 +264,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
+
   saveText: {
     color: 'white',
     fontSize: 16,
