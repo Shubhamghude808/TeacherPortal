@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   StyleSheet,
   Text,
@@ -9,30 +11,86 @@ import {
 
 import { supabase } from '../lib/supabase';
 
-const data = [
-  { id: '1', name: 'Grade 5A', students: 32 },
-  { id: '2', name: 'Grade 5B', students: 28 },
-  { id: '3', name: 'Grade 6A', students: 30 },
-  { id: '4', name: 'Grade 6B', students: 25 },
-  { id: '5', name: 'Grade 7A', students: 29 },
-];
+type Batch = {
+  id: string;
+  name: string;
+  grade: string | null;
+  is_active: boolean;
+  studentCount: number;
+};
 
 export default function Batch() {
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [teacherName, setTeacherName] = useState('');
 
-  const handleLogout = async () => {
+  useEffect(() => {
+    fetchBatches();
+  }, []);
 
-    router.replace('/');
+  const fetchBatches = async () => {
+    try {
+      // 1. Get current auth user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/');
+        return;
+      }
 
-    await supabase.auth.signOut();
-    
+      // 2. Get teacher profile
+      const { data: profile } = await supabase
+        .from('users')
+        .select('name')
+        .eq('id', user.id)
+        .single();
+
+      if (profile) setTeacherName(profile.name);
+
+      // 3. Fetch batches for this teacher, with active student count
+      const { data, error } = await supabase
+        .from('batches')
+        .select(`
+          id,
+          name,
+          grade,
+          is_active,
+          students!students_batch_id_fkey (
+            id
+          )
+        `)
+        .eq('teacher_id', user.id)
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+
+      const formatted: Batch[] = (data || []).map((batch: any) => ({
+        id: batch.id,
+        name: batch.name,
+        grade: batch.grade,
+        is_active: batch.is_active,
+        // Only count active students
+        studentCount: (batch.students || []).filter((s: any) => s.is_active !== false).length,
+      }));
+
+      setBatches(formatted);
+    } catch (err) {
+      console.error('Error fetching batches:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderItem = ({ item }: any) => (
+  const handleLogout = async () => {
+    router.replace('/');
+    await supabase.auth.signOut();
+  };
+
+  const renderItem = ({ item }: { item: Batch }) => (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push('/students' as any)}
+      onPress={() => router.push({ pathname: '/students', params: { batchId: item.id, batchName: item.name } } as any)}
     >
-
       <View style={styles.iconBox}>
         <Text>👥</Text>
       </View>
@@ -40,7 +98,7 @@ export default function Batch() {
       <View style={{ flex: 1 }}>
         <Text style={styles.title}>{item.name}</Text>
         <Text style={styles.subtitle}>
-          {item.students} students
+          {item.studentCount} student{item.studentCount !== 1 ? 's' : ''}
         </Text>
       </View>
 
@@ -52,34 +110,42 @@ export default function Batch() {
     <View style={styles.container}>
 
       <View style={styles.topBar}>
-
-        <Text style={styles.header}>
-          Select Batch
-        </Text>
+        <View>
+          <Text style={styles.header}>My Batches</Text>
+          {teacherName ? (
+            <Text style={styles.subheader}>👋 {teacherName}</Text>
+          ) : null}
+        </View>
 
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={handleLogout}
         >
-          <Text style={styles.logoutText}>
-            Logout
-          </Text>
+          <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
-
       </View>
 
-      <FlatList
-        data={data}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-      />
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+        </View>
+      ) : batches.length === 0 ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>No batches assigned yet.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={batches}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+        />
+      )}
 
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   container: {
     flex: 1,
     backgroundColor: '#f2f4f7',
@@ -97,6 +163,12 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 22,
     fontWeight: '600'
+  },
+
+  subheader: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 2
   },
 
   logoutButton: {
@@ -140,5 +212,16 @@ const styles = StyleSheet.create({
   arrow: {
     fontSize: 20,
     color: '#9ca3af'
+  },
+
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+
+  emptyText: {
+    color: '#6b7280',
+    fontSize: 15
   }
 });
