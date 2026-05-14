@@ -13,6 +13,9 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+
 type Student = {
   id: string;
   name: string;
@@ -42,6 +45,7 @@ function formatDateISO(date: Date): string {
 }
 
 export default function Students() {
+  const insets = useSafeAreaInsets();
   const { batchId, batchName } = useLocalSearchParams<{
     batchId: string;
     batchName: string;
@@ -155,6 +159,7 @@ export default function Students() {
     const isPresent = present.includes(item.id);
 
     return (
+      
       <TouchableOpacity
         style={[styles.card, isPresent && styles.presentCard]}
         onPress={() => toggleAttendance(item.id)}
@@ -191,83 +196,90 @@ export default function Students() {
   };
 
   return (
-    <View style={styles.container}>
+  <View style={styles.container}>
 
-      {/* Header */}
-      <Text style={styles.header}>Students</Text>
-      <Text style={styles.sub}>{batchName ?? 'Batch'}</Text>
+    {/* Header */}
+    <Text style={styles.header}>Students</Text>
+    <Text style={styles.sub}>{batchName ?? 'Batch'}</Text>
 
-      {/* Date Picker Row */}
+    {/* Date Picker Row */}
+    <TouchableOpacity
+      style={styles.dateRow}
+      onPress={() => setShowPicker((prev) => !prev)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.calendarIcon}>📅</Text>
+      <Text style={styles.dateText}>{formatDate(date)}</Text>
+    </TouchableOpacity>
+
+    {showPicker && (
+      <DateTimePicker
+        value={date}
+        mode="date"
+        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+        onChange={onDateChange}
+        maximumDate={new Date()}
+      />
+    )}
+
+    {showPicker && Platform.OS === 'ios' && (
       <TouchableOpacity
-        style={styles.dateRow}
-        onPress={() => setShowPicker((prev) => !prev)}
-        activeOpacity={0.7}
+        style={styles.doneButton}
+        onPress={() => setShowPicker(false)}
       >
-        <Text style={styles.calendarIcon}>📅</Text>
-        <Text style={styles.dateText}>{formatDate(date)}</Text>
+        <Text style={styles.doneText}>Done</Text>
       </TouchableOpacity>
+    )}
 
-      {showPicker && (
-        <DateTimePicker
-          value={date}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'inline' : 'default'}
-          onChange={onDateChange}
-          maximumDate={new Date()}
-        />
-      )}
-
-      {showPicker && Platform.OS === 'ios' && (
-        <TouchableOpacity
-          style={styles.doneButton}
-          onPress={() => setShowPicker(false)}
-        >
-          <Text style={styles.doneText}>Done</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Attendance summary */}
-      <View style={styles.attendanceRow}>
-        <Text style={styles.attendanceText}>
-          Attendance: {present.length}/{students.length}
-        </Text>
-        <Text style={styles.attendanceDateText}>{formatDateLong(date)}</Text>
-      </View>
-
-      {/* Student list */}
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-        </View>
-      ) : students.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>No students in this batch.</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={students}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
-        />
-      )}
-
-      {/* Save button */}
-      {!loading && students.length > 0 && (
-        <TouchableOpacity
-          style={[styles.saveButton, saving && { opacity: 0.7 }]}
-          onPress={saveAttendance}
-          disabled={saving}
-        >
-          <Text style={styles.saveText}>
-            {saving ? 'Saving...' : '⎙  Save Attendance'}
-          </Text>
-        </TouchableOpacity>
-      )}
-
+    {/* Attendance summary */}
+    <View style={styles.attendanceRow}>
+      <Text style={styles.attendanceText}>
+        Attendance: {present.length}/{students.length}
+      </Text>
+      <Text style={styles.attendanceDateText}>{formatDateLong(date)}</Text>
     </View>
-  );
+
+    {/* Hint */}
+    <View style={styles.hintCard}>
+      <Text style={styles.hintText}>
+        Tap a student to toggle attendance. Long press for details.
+      </Text>
+    </View>
+
+    {/* Student list */}
+    {loading ? (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#3b82f6" />
+      </View>
+    ) : students.length === 0 ? (
+      <View style={styles.centered}>
+        <Text style={styles.emptyText}>No students in this batch.</Text>
+      </View>
+    ) : (
+      <FlatList
+        data={students}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
+    )}
+
+    {/* Save button */}
+{!loading && students.length > 0 && (
+  <TouchableOpacity
+    style={[styles.saveButton, saving && { opacity: 0.7 }, { bottom: 20 + insets.bottom }]}
+    onPress={saveAttendance}
+    disabled={saving}
+  >
+    <Text style={styles.saveText}>
+      {saving ? 'Saving...' : '⎙  Save Attendance'}
+    </Text>
+  </TouchableOpacity>
+)}
+
+  </View>
+);
 }
 
 const styles = StyleSheet.create({
@@ -353,4 +365,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveText: { color: 'white', fontWeight: '600', fontSize: 16 },
+
+   hintCard: {
+    backgroundColor: '#dce6f4',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+  },
+
+  hintText: {
+    color: '#374151',
+    fontSize: 14,
+    lineHeight: 20,
+  },
 });
