@@ -59,24 +59,42 @@ export default function Login() {
   }, []);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Missing Details', 'Please enter email and password');
+  if (!email || !password) {
+    Alert.alert('Missing Details', 'Please enter email and password');
+    return;
+  }
+  try {
+    setLoading(true);
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      Alert.alert('Login Failed', 'Invalid email or password');
+      setLoading(false);
       return;
     }
-    try {
-      setLoading(true);
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        Alert.alert('Login Failed', 'Invalid email or password');
-        setLoading(false);
-      }
-      // No redirect needed — onAuthStateChange drives it
-    } catch (err) {
-      console.log(err);
-      Alert.alert('Error', 'Something went wrong');
+
+    // Check if user is active
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile } = await supabase
+      .from('users')
+      .select('is_active')
+      .eq('id', user?.id)
+      .single();
+
+    if (!profile?.is_active) {
+      await supabase.auth.signOut(); // sign them back out immediately
+      Alert.alert('Account Disabled', 'Your account has been deactivated. Please contact your administrator.');
       setLoading(false);
+      return;
     }
-  };
+
+    // onAuthStateChange will handle redirect
+  } catch (err) {
+    console.log(err);
+    Alert.alert('Error', 'Something went wrong');
+    setLoading(false);
+  }
+};
 
   if (session === undefined) {
     return (
