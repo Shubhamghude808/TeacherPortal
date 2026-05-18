@@ -9,22 +9,30 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useState, useEffect } from 'react';
 
 import { supabase } from '../lib/supabase';
 
+type Remark = {
+  content: string;
+  updated_at: string;
+};
+
 export default function PersonalRemarks() {
+  
+  const insets = useSafeAreaInsets();
   const { studentName, studentId } = useLocalSearchParams<{
     studentName: string;
     studentId: string;
   }>();
 
   const [remarks, setRemarks] = useState('');
+  const [previousRemarks, setPreviousRemarks] = useState<Remark[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load existing remarks
   useEffect(() => {
     fetchRemarks();
   }, []);
@@ -32,29 +40,23 @@ export default function PersonalRemarks() {
   const fetchRemarks = async () => {
     const { data, error } = await supabase
       .from('remarks')
-      .select('*')
+      .select('content, updated_at')
       .eq('student_id', studentId)
-      .single();
+      .order('updated_at', { ascending: false });
 
     if (error) {
-      // Ignore "no rows found"
-      if (error.code !== 'PGRST116') {
-        console.log('Fetch remarks error:', error);
-      }
+      console.log('Fetch remarks error:', error);
       return;
     }
 
     if (data) {
-      setRemarks(data.content || '');
+      setPreviousRemarks(data);
     }
   };
 
   const handleSave = async () => {
     if (!remarks.trim()) {
-      Alert.alert(
-        'Empty Remarks',
-        'Please write something before saving.'
-      );
+      Alert.alert('Empty Remarks', 'Please write something before saving.');
       return;
     }
 
@@ -67,87 +69,70 @@ export default function PersonalRemarks() {
 
       const { error } = await supabase
         .from('remarks')
-        .upsert(
-          {
-            student_id: studentId,
-            content: remarks,
-            written_by: user?.id,
-          },
-          {
-            onConflict: 'student_id',
-          }
-        );
+        .insert({
+          student_id: studentId,
+          content: remarks.trim(),
+          written_by: user?.id,
+        });
 
       if (error) {
         console.log('Save remarks error:', error);
-
-        Alert.alert(
-          'Error',
-          'Failed to save remarks.'
-        );
-
+        Alert.alert('Error', 'Failed to save remarks.');
         return;
       }
 
-      Alert.alert(
-        'Saved',
-        'Remarks saved successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back(),
-          },
-        ]
-      );
+      // Prepend new remark locally without refetching
+      const newRemark: Remark = {
+        content: remarks.trim(),
+        updated_at: new Date().toISOString(),
+      };
+      setPreviousRemarks((prev) => [newRemark, ...prev]);
+      setRemarks('');
+
+      Alert.alert('Saved', 'Remarks saved successfully!');
     } catch (err) {
       console.log(err);
-
-      Alert.alert(
-        'Error',
-        'Something went wrong.'
-      );
+      Alert.alert('Error', 'Something went wrong.');
     } finally {
       setLoading(false);
     }
   };
 
+  const formatDate = (isoString: string) => {
+    if (!isoString) return '';
+    return new Date(isoString).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f2f4f7' }} edges={['bottom', 'top']}>
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={
-        Platform.OS === 'ios'
-          ? 'padding'
-          : undefined
-      }
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
+      <ScrollView 
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: 40 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
         <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backBtn}
-          >
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
 
           <View>
-            <Text style={styles.header}>
-              Personal Remarks
-            </Text>
-
-            <Text style={styles.subHeader}>
-              {studentName ?? 'Student'}
-            </Text>
+            <Text style={styles.header}>Personal Remarks</Text>
+            <Text style={styles.subHeader}>{studentName ?? 'Student'}</Text>
           </View>
         </View>
 
         <View style={styles.divider} />
 
-        {/* Card */}
+        {/* New Remarks Card */}
         <View style={styles.card}>
           <TextInput
             style={styles.textInput}
@@ -160,23 +145,34 @@ export default function PersonalRemarks() {
           />
 
           <TouchableOpacity
-            style={[
-              styles.saveButton,
-              loading && { opacity: 0.7 },
-            ]}
+            style={[styles.saveButton, loading && { opacity: 0.7 }]}
             onPress={handleSave}
             activeOpacity={0.85}
             disabled={loading}
           >
             <Text style={styles.saveText}>
-              {loading
-                ? 'Saving...'
-                : 'Save Remarks'}
+              {loading ? 'Saving...' : 'Save Remarks'}
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Previous Remarks */}
+        {previousRemarks.length > 0 && (
+          <View style={styles.previousSection}>
+            <Text style={styles.sectionTitle}>Previous Remarks</Text>
+
+            {previousRemarks.map((item, index) => (
+              <View key={index} style={styles.previousCard}>
+                <Text style={styles.previousDate}>{formatDate(item.updated_at)}</Text>
+                <View style={styles.previousDivider} />
+                <Text style={styles.previousContent}>{item.content}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
+  </SafeAreaView>
   );
 }
 
@@ -188,13 +184,11 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 15,
-    paddingBottom: 40,
   },
 
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 20,
     paddingBottom: 14,
     gap: 6,
   },
@@ -233,15 +227,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 16,
     padding: 16,
-
     shadowColor: '#000',
     shadowOpacity: 0.04,
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowRadius: 4,
-
     elevation: 1,
     gap: 16,
   },
@@ -269,5 +258,48 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  previousSection: {
+    marginTop: 24,
+  },
+
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+
+  previousCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 4,
+    elevation: 1,
+  },
+
+  previousDate: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginBottom: 8,
+  },
+
+  previousDivider: {
+    height: 1,
+    backgroundColor: '#f3f4f6',
+    marginBottom: 10,
+  },
+
+  previousContent: {
+    fontSize: 15,
+    color: '#374151',
+    lineHeight: 22,
   },
 });

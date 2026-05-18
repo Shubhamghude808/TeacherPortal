@@ -25,61 +25,59 @@ export default function Batch() {
   const [teacherName, setTeacherName] = useState('');
 
   useEffect(() => {
-    fetchBatches();
-  }, []);
+  let fetched = false; // ✅ guard
 
-  const fetchBatches = async () => {
-    try {
-      // 1. Get current auth user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (event, session) => {
+      if (session && !fetched) {
+        fetched = true; // ✅ prevent re-runs
+        fetchBatches(session.user.id);
+      } else if (!session && event === 'SIGNED_OUT') {
         router.replace('/');
-        return;
       }
-
-      // 2. Get teacher profile
-      const { data: profile } = await supabase
-        .from('users')
-        .select('name')
-        .eq('id', user.id)
-        .single();
-
-      if (profile) setTeacherName(profile.name);
-
-      // 3. Fetch batches for this teacher, with active student count
-      const { data, error } = await supabase
-        .from('batches')
-        .select(`
-          id,
-          name,
-          grade,
-          is_active,
-          students!students_batch_id_fkey (
-            id
-          )
-        `)
-        .eq('teacher_id', user.id)
-        .eq('is_active', true)
-        .order('name');
-
-      if (error) throw error;
-
-      const formatted: Batch[] = (data || []).map((batch: any) => ({
-        id: batch.id,
-        name: batch.name,
-        grade: batch.grade,
-        is_active: batch.is_active,
-        // Only count active students
-        studentCount: (batch.students || []).filter((s: any) => s.is_active !== false).length,
-      }));
-
-      setBatches(formatted);
-    } catch (err) {
-      console.error('Error fetching batches:', err);
-    } finally {
-      setLoading(false);
     }
-  };
+  );
+  return () => subscription.unsubscribe();
+}, []);
+
+// Accept userId as param to avoid redundant getUser() call
+const fetchBatches = async (userId: string) => {
+  try {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('name')
+      .eq('id', userId)
+      .single();
+
+    if (profile) setTeacherName(profile.name);
+
+    const { data, error } = await supabase
+      .from('batches')
+      .select(`
+        id, name, grade, is_active,
+        students!students_batch_id_fkey ( id, is_active )
+      `)
+      .eq('teacher_id', userId)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+
+    const formatted: Batch[] = (data || []).map((batch: any) => ({
+      id: batch.id,
+      name: batch.name,
+      grade: batch.grade,
+      is_active: batch.is_active,
+      studentCount: (batch.students || []).filter((s: any) => s.is_active !== false).length,
+    }));
+
+    setBatches(formatted);
+  } catch (err) {
+    console.error('Error fetching batches:', err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleLogout = async () => {
     router.replace('/');
@@ -113,7 +111,7 @@ export default function Batch() {
         <View>
           <Text style={styles.header}>My Batches</Text>
           {teacherName ? (
-            <Text style={styles.subheader}>👋 {teacherName}</Text>
+            <Text style={styles.subheader}> {teacherName}</Text>
           ) : null}
         </View>
 

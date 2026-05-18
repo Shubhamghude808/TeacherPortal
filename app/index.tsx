@@ -23,12 +23,20 @@ export default function Login() {
   };
 
   useEffect(() => {
-    // Load cached role immediately so redirect is instant on reopen
-    AsyncStorage.getItem('userRole').then(cached => {
-      if (cached) setRole(cached);
+    // Fast path: use cache only on cold start (app reopen with existing session)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        const cached = await AsyncStorage.getItem('userRole');
+        if (cached) {
+          setRole(cached);
+          setSession(session); // instant redirect on reopen
+        }
+        // If no cache, onAuthStateChange will handle it below
+      } else {
+        setSession(null); // no session → show login form
+      }
     });
 
-    // Single source of truth — skip getSession, rely on onAuthStateChange
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'SIGNED_OUT') {
@@ -38,16 +46,11 @@ export default function Login() {
           return;
         }
 
-        if (session) {
-          // Use cached role while fresh one loads in background
-          const cached = await AsyncStorage.getItem('userRole');
-          if (cached) setRole(cached);
-
+        if (event === 'SIGNED_IN' && session) {
+          // Fresh login — always fetch correct role, never trust stale cache
           const freshRole = await fetchAndCacheRole(session.user.id);
           setRole(freshRole);
           setSession(session);
-        } else {
-          setSession(null);
         }
       }
     );
