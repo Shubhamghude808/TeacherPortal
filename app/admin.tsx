@@ -61,15 +61,28 @@ export default function AdminDashboard() {
   const [fieldBatchId,    setFieldBatchId]    = useState('');
 
   // ── Load admin name ──────────────────────────────────────────────────────────
-
   useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from('users').select('name').eq('id', user.id).single();
-      if (data) setAdminName(data.name);
-    })();
-  }, []);
+  let fetched = false; // ✅ guard
+
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (event, session) => {
+      if (session && !fetched) {
+        fetched = true; // ✅ prevent re-runs
+
+        supabase.from('users').select('name').eq('id', session.user.id).single()
+          .then(({ data }) => { if (data) setAdminName(data.name); });
+
+        supabase.from('schools').select('*').order('created_at', { ascending: false })
+          .then(({ data }) => setSchools(data ?? []));
+
+        fetchAllData();
+      } else if (!session && event === 'SIGNED_OUT') {
+        router.replace('/');
+      }
+    }
+  );
+  return () => subscription.unsubscribe();
+}, []);
 
   // ── Fetch schools once (needed for teacher's school dropdown) ────────────────
 
@@ -461,14 +474,20 @@ const fetchTab = async (tab: Tab) => {
 
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hello, {adminName} 👋</Text>
-          <Text style={styles.headerSub}>Admin Dashboard</Text>
-        </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
+  <View>
+    <Text style={styles.greeting}>Hello, {adminName} </Text>
+    <Text style={styles.headerSub}>Admin Dashboard</Text>
+  </View>
+  <View style={{ flexDirection: 'row', gap: 8 }}>
+    {/* ✅ Add this */}
+    <TouchableOpacity onPress={() => router.push('/report')} style={styles.reportBtn}>
+      <Text style={styles.logoutText}>📊 Report</Text>
+    </TouchableOpacity>
+    <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+      <Text style={styles.logoutText}>Logout</Text>
+    </TouchableOpacity>
+  </View>
+</View>
 
       {/* Stats row */}
       <View style={styles.statsRow}>
@@ -536,7 +555,7 @@ const fetchTab = async (tab: Tab) => {
             <View style={styles.modalHandle} />
 
             <Text style={styles.modalTitle}>
-              {modalMode === 'add' ? `Add ${currentTab.label.slice(0, -1)}` : `Edit ${currentTab.label.slice(0, -1)}`}
+              {modalMode === 'add' ? `Add ${currentTab.label.slice(0, -2)}` : `Edit ${currentTab.label.slice(0, -2)}`}
             </Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -705,4 +724,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 14, alignItems: 'center',
   },
   saveBtnText: { color: '#fff', fontWeight: '700' },
+
+  //report btn
+  reportBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 },
 });

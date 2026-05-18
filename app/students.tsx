@@ -197,10 +197,17 @@ export default function Students() {
 
   return (
   <View style={styles.container}>
-
+    
     {/* Header */}
+    <View style={styles.headerRow}>
+  <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+    <Text style={styles.backArrow}>‹</Text>
+  </TouchableOpacity>
+  <View>
     <Text style={styles.header}>Students</Text>
     <Text style={styles.sub}>{batchName ?? 'Batch'}</Text>
+  </View>
+</View>
 
     {/* Date Picker Row */}
     <TouchableOpacity
@@ -284,7 +291,21 @@ export default function Students() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f2f4f7', padding: 15 },
-
+headerRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+  marginBottom: 12,
+},
+backBtn: {
+  padding: 2,
+  marginRight: 4,
+},
+backArrow: {
+  fontSize: 28,
+  color: '#1f2937',
+  lineHeight: 30,
+},
   header: { fontSize: 22, fontWeight: '600', paddingTop: 25 },
   sub: { color: 'gray', marginBottom: 12 },
 
